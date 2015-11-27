@@ -1,0 +1,113 @@
+<% node[:nginx][:upstreams].each do |upstream| %>
+  upstream <%= upstream[:name] %> {
+    server <%= upstream['host'] %>:<%= upstream[:port].to_i %> fail_timeout=0;
+  }
+<% end %>
+
+<% node[:nginx][:servers].each do |server| %>
+server {
+  listen 80;
+  server_name <%= server[:hostname] %>;
+  root /home/<%= node[:app][:user] %>/<%= node[:app][:name] %>/public;
+
+  location /health_check {
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host $http_host;
+        proxy_redirect off;
+        proxy_pass http://<%= server[:upstream] %>;
+        break;
+  }
+
+  location ~ ^/assets/ {
+    expires 1y;
+    add_header Cache-Control public;
+
+    add_header ETag "";
+    gzip on;
+    gzip_disable "msie6";
+
+    gzip_comp_level 6;
+    gzip_min_length 1100;
+    gzip_buffers 16 8k;
+    gzip_proxied any;
+    gzip_types
+        text/plain
+        text/css
+        text/js
+        text/xml
+        text/javascript
+        application/javascript
+        application/x-javascript
+        application/json
+        application/xml
+        image/svg+xml
+        application/xml+rss;
+    break;
+  }
+  location / {
+
+    if ($http_x_forwarded_proto != 'https') {
+      rewrite ^ https://$host$request_uri? permanent;
+    }
+    proxy_set_header Access-Control-Allow-Origin "*";
+    proxy_set_header X-Real-IP  $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-NginX-Proxy true;
+    proxy_redirect off;
+    proxy_pass http://<%= server[:upstream] %>;
+  }
+  <% server[:adtl_upstreams].each do |upstream| %>
+    location <%= upstream[:location] %> {
+
+    if ($http_x_forwarded_proto != 'https') {
+      rewrite ^ https://$host$request_uri? permanent;
+    }
+    # add_header Access-Control-Allow-Origin *;
+    proxy_set_header Access-Control-Allow-Origin "*";
+    proxy_set_header X-Real-IP  $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-NginX-Proxy true;
+    proxy_redirect off;
+    proxy_pass http://<%= upstream[:name] %>;
+  }
+  <% end %>
+
+  <% server[:redirects].each do |redirect| %>
+    location <%= redirect[:from] %> {
+      rewrite ^ https://$host<%= redirect[:to] %> permanent;
+    }
+  <% end %>
+
+
+  location = /xmlrpc.php {
+      deny all;
+  }
+
+  keepalive_timeout 10;
+  error_page 500 502 503 504 /500.html;
+}
+<% end %>
+
+<% if node[:nginx][:redirect_www_to_root] %>
+server {
+  listen 443 ssl;
+  server_name www.<%= node[:nginx][:hostname] %>;
+
+  ssl_certificate /home/<%= node[:app][:user] %>/.ssh/<%= node[:app][:ssl_cert_name] %>.crt;
+  ssl_certificate_key /home/<%= node[:app][:user] %>/.ssh/<%= node[:app][:ssl_cert_name] %>.key;
+
+  rewrite ^ $scheme://<%= node[:nginx][:hostname] %>$request_uri? permanent;
+
+}
+
+server {
+  listen 80;
+  server_name www.<%= node[:nginx][:hostname] %>;
+
+  rewrite ^ https://<%= node[:nginx][:hostname] %>$request_uri? permanent;
+
+}
+<% end %>

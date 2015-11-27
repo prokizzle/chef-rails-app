@@ -1,0 +1,26 @@
+vcl 4.0;
+
+backend default {
+  .host = "localhost";
+  .port = "<%= node[:app][:port] %>";
+  .connect_timeout = 1s;
+  .first_byte_timeout = 5s;
+  .between_bytes_timeout = 2s;
+
+  .probe = {
+    .url       = "/health_check";
+    .timeout   = 2 s;
+    .interval  = 1s;
+    .window    = 10;
+    .threshold = 8;
+  }
+}
+
+sub vcl_backend_error {
+  set beresp.http.Content-Type = "text/html; charset=utf-8";
+  set beresp.status = 200;
+  synthetic ( {"
+    <%= node[:varnish][:error_page] %>
+  "} );
+  return (deliver);
+}
